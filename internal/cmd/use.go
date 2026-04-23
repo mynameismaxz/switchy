@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/mynameismaxz/switchy/internal/clipboard"
 	"github.com/mynameismaxz/switchy/internal/config"
 	"github.com/mynameismaxz/switchy/internal/profile"
 	"github.com/mynameismaxz/switchy/internal/shell"
@@ -61,8 +62,13 @@ func newUseCmd() *cobra.Command {
 				}); err != nil {
 					exitError("could not save state: %v", err)
 				}
+				evalCmd := fmt.Sprintf(`eval "$(swy export %s)"`, name)
 				fmt.Printf("Profile %q selected.\n", name)
-				fmt.Printf("To apply now:  eval \"$(swy export %s)\"\n", name)
+				if clipboard.Copy(evalCmd) {
+					fmt.Println("Copied to clipboard — paste and press Enter to apply.")
+				} else {
+					fmt.Printf("To apply now:  %s\n", evalCmd)
+				}
 				fmt.Printf("To persist:    swy use %s --persistent\n", name)
 			}
 			return nil
