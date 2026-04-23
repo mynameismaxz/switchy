@@ -55,10 +55,11 @@ make build
 # Create a profile
 swy set local ANTHROPIC_BASE_URL=http://localhost:8080 API_KEY=dev-key
 
-# Apply it to your current shell session
-eval "$(swy export local)"
+# Select it — the apply command is copied to your clipboard automatically
+swy use local
+# → paste and press Enter to apply
 
-# Or install the shell helper once (easier)
+# Or install the shell helper once (no clipboard needed)
 swy init
 swyuse local
 ```
@@ -113,14 +114,22 @@ export SWITCHY_PROFILE='local'
 
 ### `swy use <profile>`
 
-Mark a profile as selected and print activation guidance. Does not modify the rc file.
+Mark a profile as selected and copy the apply command to your clipboard automatically. Does not modify the rc file.
 
 ```bash
 swy use local
 # Profile "local" selected.
-# To apply now:  eval "$(swy export local)"
+# Copied to clipboard — paste and press Enter to apply.
 # To persist:    swy use local --persistent
 ```
+
+Just paste and press Enter — no typing required. If no clipboard tool is available, the `eval` command is printed instead:
+
+```bash
+# To apply now:  eval "$(swy export local)"
+```
+
+> **Clipboard support:** macOS uses `pbcopy` (always available). Linux requires `xclip`, `xsel`, or `wl-copy`.
 
 ### `swy use <profile> --persistent`
 
