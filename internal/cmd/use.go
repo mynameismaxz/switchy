@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 
 	"github.com/mynameismaxz/switchy/internal/clipboard"
@@ -14,6 +15,7 @@ import (
 
 func newUseCmd() *cobra.Command {
 	var persistent bool
+	var inline bool
 
 	cmd := &cobra.Command{
 		Use:   "use <profile>",
@@ -29,7 +31,26 @@ func newUseCmd() *cobra.Command {
 				exitError("%v", err)
 			}
 
-			if persistent {
+			if inline {
+				sh, err := shell.Detect(shellOverride)
+				if err != nil {
+					exitError("%v", err)
+				}
+				upsertVars := make(map[string]string, len(vars)+1)
+				maps.Copy(upsertVars, vars)
+				upsertVars["SWITCHY_PROFILE"] = name
+				if err := shell.UpsertExports(sh, upsertVars); err != nil {
+					exitError("could not update %s: %v", sh.RCFile, err)
+				}
+				if err := config.SaveState(&config.StateFile{
+					CurrentProfile:     name,
+					LastActivationMode: "persistent",
+				}); err != nil {
+					exitError("could not save state: %v", err)
+				}
+				fmt.Printf("Profile %q applied to %s.\n", name, sh.RCFile)
+				fmt.Printf("Run: source %s\n", sh.RCFile)
+			} else if persistent {
 				sh, err := shell.Detect(shellOverride)
 				if err != nil {
 					exitError("%v", err)
@@ -76,5 +97,6 @@ func newUseCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&persistent, "persistent", false, "Write profile to shell rc file for future sessions")
+	cmd.Flags().BoolVar(&inline, "inline", false, "Edit export statements directly in the shell rc file (update existing or append new)")
 	return cmd
 }
