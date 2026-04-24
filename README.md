@@ -142,6 +142,19 @@ source ~/.zshrc
 
 Writes to `~/.zshrc` (zsh) or `~/.bashrc` (bash). A backup is created at `~/.zshrc.switchy.bak` before the first modification.
 
+### `swy use <profile> --inline`
+
+Edit existing `export KEY=...` lines in your rc file in place — no managed block, no `eval`. For each variable in the profile, Switchy updates the **first non-commented matching `export`** it finds, or appends the line at the end if none exists.
+
+```bash
+swy use local --inline
+source ~/.zshrc
+```
+
+Useful when you already have `export ANTHROPIC_BASE_URL=...` written by hand somewhere in your rc file and just want its value swapped, without introducing a Switchy-managed block. Commented-out `# export ...` lines are never touched. A backup is still created on the first write.
+
+> Choose `--persistent` if you prefer all Switchy-managed exports grouped in a clearly delimited block; choose `--inline` if you'd rather Switchy edit the lines you already have.
+
 ### `swy current`
 
 Show the last profile selected through Switchy.
@@ -210,7 +223,7 @@ Shell: zsh  •  Current: local
 | `a` | Add new profile |
 | `e` | Edit selected profile |
 | `d` | Delete selected profile |
-| `s` | Select profile (session mode) |
+| `s` | Select profile and apply inline to rc file |
 | `x` | Show export commands |
 | `q` | Quit |
 

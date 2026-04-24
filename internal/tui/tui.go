@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -205,17 +206,40 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		name := m.profiles[m.cursor]
+		vars, err := profile.GetProfile(name)
+		if err != nil {
+			m.message = "Error: " + err.Error()
+			m.isError = true
+			m.state = viewMessage
+			return m, nil
+		}
+		sh, err := shell.Detect("")
+		if err != nil {
+			m.message = "Error: " + err.Error()
+			m.isError = true
+			m.state = viewMessage
+			return m, nil
+		}
+		upsertVars := make(map[string]string, len(vars)+1)
+		maps.Copy(upsertVars, vars)
+		upsertVars["SWITCHY_PROFILE"] = name
+		if err := shell.UpsertExports(sh, upsertVars); err != nil {
+			m.message = "Error: " + err.Error()
+			m.isError = true
+			m.state = viewMessage
+			return m, nil
+		}
 		if err := config.SaveState(&config.StateFile{
 			CurrentProfile:     name,
-			LastActivationMode: "session",
+			LastActivationMode: "persistent",
 		}); err != nil {
 			m.message = "Error: " + err.Error()
 			m.isError = true
 		} else {
 			m.current = name
 			m.message = fmt.Sprintf(
-				"Profile %q selected.\n\nTo apply in your current shell:\n  eval \"$(swy export %s)\"",
-				name, name,
+				"Profile %q applied to %s.\n\nRun: source %s",
+				name, sh.RCFile, sh.RCFile,
 			)
 			m.isError = false
 		}
