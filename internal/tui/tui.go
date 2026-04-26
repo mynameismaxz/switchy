@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/mynameismaxz/switchy/internal/clipboard"
 	"github.com/mynameismaxz/switchy/internal/config"
 	"github.com/mynameismaxz/switchy/internal/profile"
 	"github.com/mynameismaxz/switchy/internal/shell"
@@ -25,7 +26,7 @@ var (
 	gray   = lipgloss.Color("#6B7280")
 	light  = lipgloss.Color("#9CA3AF")
 
-	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(purple)
+	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(purple)
 	selectedStyle = lipgloss.NewStyle().Foreground(purple).Bold(true)
 	currentStyle  = lipgloss.NewStyle().Foreground(green).Bold(true)
 	dimStyle      = lipgloss.NewStyle().Foreground(gray)
@@ -40,11 +41,12 @@ var (
 type viewState int
 
 const (
-	viewList viewState = iota
-	viewAddName
-	viewEditVars
-	viewDeleteConfirm
-	viewMessage
+	viewList          viewState = iota
+	viewAddName                 // input profile name (add or duplicate)
+	viewVarList                 // navigable list of pending vars
+	viewDeleteConfirm           // delete confirmation
+	viewMessage                 // success/error message
+	viewEditOneVar              // text input for a single KEY=VALUE
 )
 
 // ── Model ────────────────────────────────────────────────────────────────────
@@ -56,14 +58,25 @@ type model struct {
 	shell    string
 	cursor   int
 
-	input       textinput.Model
-	editTarget  string
+	input      textinput.Model
+	editTarget string
 	pendingVars map[string]string
-	isAdding    bool
-	formErr     string
+	isAdding   bool
+	formErr    string
+
+	// duplicate flow
+	duplicateSource string
+
+	// var-list navigation
+	varCursor  int
+	varKeys    []string
+	editingKey string
 
 	message string
 	isError bool
+
+	// printed to stdout by Run() after the TUI exits
+	finalMsg string
 
 	width  int
 	height int
@@ -103,8 +116,14 @@ func (m *model) reload() {
 func Run() error {
 	m := initialModel()
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	_, err := p.Run()
-	return err
+	final, err := p.Run()
+	if err != nil {
+		return err
+	}
+	if fm, ok := final.(model); ok && fm.finalMsg != "" {
+		fmt.Println(fm.finalMsg)
+	}
+	return nil
 }
 
 // ── Bubbletea interface ──────────────────────────────────────────────────────
@@ -128,8 +147,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateList(msg)
 		case viewAddName:
 			return m.updateAddName(msg)
-		case viewEditVars:
-			return m.updateEditVars(msg)
+		case viewVarList:
+			return m.updateVarList(msg)
+		case viewEditOneVar:
+			return m.updateEditOneVar(msg)
 		case viewDeleteConfirm:
 			return m.updateDeleteConfirm(msg)
 		case viewMessage:
@@ -164,6 +185,26 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.Placeholder = "my-profile"
 		m.input.Focus()
 		m.pendingVars = make(map[string]string)
+		m.varKeys = []string{}
+		m.varCursor = 0
+		m.isAdding = true
+		m.editTarget = ""
+		m.duplicateSource = ""
+		m.formErr = ""
+		return m, textinput.Blink
+
+	case "p":
+		if len(m.profiles) == 0 {
+			return m, nil
+		}
+		m.duplicateSource = m.profiles[m.cursor]
+		m.state = viewAddName
+		m.input.Reset()
+		m.input.Placeholder = "my-profile-copy"
+		m.input.Focus()
+		m.pendingVars = make(map[string]string)
+		m.varKeys = []string{}
+		m.varCursor = 0
 		m.isAdding = true
 		m.editTarget = ""
 		m.formErr = ""
@@ -184,15 +225,12 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.editTarget = name
 		m.isAdding = false
 		m.pendingVars = make(map[string]string, len(vars))
-		for k, v := range vars {
-			m.pendingVars[k] = v
-		}
-		m.state = viewEditVars
-		m.input.Reset()
-		m.input.Placeholder = "KEY=VALUE"
-		m.input.Focus()
+		maps.Copy(m.pendingVars, vars)
+		m.varKeys = sortedKeys(m.pendingVars)
+		m.varCursor = 0
+		m.state = viewVarList
 		m.formErr = ""
-		return m, textinput.Blink
+		return m, nil
 
 	case "d":
 		if len(m.profiles) == 0 {
@@ -206,44 +244,18 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		name := m.profiles[m.cursor]
-		vars, err := profile.GetProfile(name)
-		if err != nil {
-			m.message = "Error: " + err.Error()
-			m.isError = true
-			m.state = viewMessage
-			return m, nil
-		}
-		sh, err := shell.Detect("")
-		if err != nil {
-			m.message = "Error: " + err.Error()
-			m.isError = true
-			m.state = viewMessage
-			return m, nil
-		}
-		upsertVars := make(map[string]string, len(vars)+1)
-		maps.Copy(upsertVars, vars)
-		upsertVars["SWITCHY_PROFILE"] = name
-		if err := shell.UpsertExports(sh, upsertVars); err != nil {
-			m.message = "Error: " + err.Error()
-			m.isError = true
-			m.state = viewMessage
-			return m, nil
-		}
-		if err := config.SaveState(&config.StateFile{
+		evalCmd := fmt.Sprintf(`eval "$(swy export %s)"`, name)
+		copied := clipboard.Copy(evalCmd)
+		_ = config.SaveState(&config.StateFile{
 			CurrentProfile:     name,
-			LastActivationMode: "persistent",
-		}); err != nil {
-			m.message = "Error: " + err.Error()
-			m.isError = true
+			LastActivationMode: "session",
+		})
+		if copied {
+			m.finalMsg = fmt.Sprintf("Switched to %q — command copied to clipboard.\nPaste and press Enter to apply.", name)
 		} else {
-			m.current = name
-			m.message = fmt.Sprintf(
-				"Profile %q applied to %s.\n\nRun: source %s",
-				name, sh.RCFile, sh.RCFile,
-			)
-			m.isError = false
+			m.finalMsg = fmt.Sprintf("Switched to %q.\nTo apply:  %s", name, evalCmd)
 		}
-		m.state = viewMessage
+		return m, tea.Quit
 
 	case "x":
 		if len(m.profiles) == 0 {
@@ -276,6 +288,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) updateAddName(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		m.duplicateSource = ""
 		m.state = viewList
 		return m, nil
 	case "enter":
@@ -285,11 +298,19 @@ func (m model) updateAddName(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 		}
 		m.editTarget = name
-		m.state = viewEditVars
+		m.pendingVars = make(map[string]string)
+		if m.duplicateSource != "" {
+			if src, err := profile.GetProfile(m.duplicateSource); err == nil {
+				maps.Copy(m.pendingVars, src)
+			}
+			m.duplicateSource = ""
+		}
+		m.varKeys = sortedKeys(m.pendingVars)
+		m.varCursor = 0
+		m.state = viewVarList
 		m.input.Reset()
-		m.input.Placeholder = "KEY=VALUE"
 		m.formErr = ""
-		return m, textinput.Blink
+		return m, nil
 	default:
 		m.formErr = ""
 	}
@@ -298,33 +319,94 @@ func (m model) updateAddName(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m model) updateEditVars(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) updateVarList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.state = viewList
 		m.reload()
 		return m, nil
+
+	case "up", "k":
+		if m.varCursor > 0 {
+			m.varCursor--
+		}
+
+	case "down", "j":
+		if m.varCursor < len(m.varKeys)-1 {
+			m.varCursor++
+		}
+
+	case "a":
+		m.editingKey = ""
+		m.input.Reset()
+		m.input.Placeholder = "KEY=VALUE"
+		m.input.Focus()
+		m.formErr = ""
+		m.state = viewEditOneVar
+		return m, textinput.Blink
+
+	case "enter":
+		if len(m.varKeys) == 0 {
+			m.formErr = "press 'a' to add a variable"
+			return m, nil
+		}
+		key := m.varKeys[m.varCursor]
+		m.editingKey = key
+		m.input.Reset()
+		m.input.SetValue(key + "=" + m.pendingVars[key])
+		m.input.Focus()
+		m.formErr = ""
+		m.state = viewEditOneVar
+		return m, textinput.Blink
+
+	case "d":
+		if len(m.varKeys) == 0 {
+			return m, nil
+		}
+		key := m.varKeys[m.varCursor]
+		delete(m.pendingVars, key)
+		m.varKeys = sortedKeys(m.pendingVars)
+		if m.varCursor >= len(m.varKeys) && m.varCursor > 0 {
+			m.varCursor = len(m.varKeys) - 1
+		}
+		m.formErr = ""
+
+	case "s":
+		if m.isAdding && len(m.pendingVars) == 0 {
+			m.formErr = "at least one KEY=VALUE is required"
+			return m, nil
+		}
+		if err := profile.UpsertProfile(m.editTarget, m.pendingVars); err != nil {
+			m.message = "Error: " + err.Error()
+			m.isError = true
+		} else {
+			action := "updated"
+			if m.isAdding {
+				action = "created"
+			}
+			m.message = fmt.Sprintf("Profile %q %s.", m.editTarget, action)
+			m.isError = false
+			m.reload()
+		}
+		m.state = viewMessage
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m model) updateEditOneVar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.state = viewVarList
+		m.editingKey = ""
+		m.input.Reset()
+		m.formErr = ""
+		return m, nil
 	case "enter":
 		val := strings.TrimSpace(m.input.Value())
 		if val == "" {
-			if m.isAdding && len(m.pendingVars) == 0 {
-				m.formErr = "at least one KEY=VALUE is required"
-				return m, textinput.Blink
-			}
-			if err := profile.UpsertProfile(m.editTarget, m.pendingVars); err != nil {
-				m.message = "Error: " + err.Error()
-				m.isError = true
-			} else {
-				action := "updated"
-				if m.isAdding {
-					action = "created"
-				}
-				m.message = fmt.Sprintf("Profile %q %s.", m.editTarget, action)
-				m.isError = false
-				m.reload()
-			}
-			m.state = viewMessage
-			return m, nil
+			m.formErr = "enter KEY=VALUE"
+			return m, textinput.Blink
 		}
 		pairs, err := validate.ParseKVPairs([]string{val})
 		if err != nil {
@@ -332,12 +414,28 @@ func (m model) updateEditVars(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input.Reset()
 			return m, textinput.Blink
 		}
-		for k, v := range pairs {
-			m.pendingVars[k] = v
+		// if the key was renamed, remove the old entry
+		for newKey := range pairs {
+			if m.editingKey != "" && m.editingKey != newKey {
+				delete(m.pendingVars, m.editingKey)
+			}
+			m.pendingVars[newKey] = pairs[newKey]
 		}
-		m.formErr = ""
+		m.varKeys = sortedKeys(m.pendingVars)
+		// keep cursor on the edited/new key
+		for newKey := range pairs {
+			for i, k := range m.varKeys {
+				if k == newKey {
+					m.varCursor = i
+					break
+				}
+			}
+		}
+		m.editingKey = ""
 		m.input.Reset()
-		return m, textinput.Blink
+		m.formErr = ""
+		m.state = viewVarList
+		return m, nil
 	default:
 		m.formErr = ""
 	}
@@ -372,8 +470,10 @@ func (m model) View() string {
 		return m.renderList()
 	case viewAddName:
 		return m.renderAddName()
-	case viewEditVars:
-		return m.renderEditVars()
+	case viewVarList:
+		return m.renderVarList()
+	case viewEditOneVar:
+		return m.renderEditOneVar()
 	case viewDeleteConfirm:
 		return m.renderDeleteConfirm()
 	case viewMessage:
@@ -419,14 +519,18 @@ func (m model) renderList() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑↓/jk navigate  a add  e edit  d delete  s switch  x export  q quit"))
+	b.WriteString(helpStyle.Render("↑↓/jk navigate  a add  p dup  e edit  d delete  s use  x export  q quit"))
 	b.WriteString("\n")
 	return b.String()
 }
 
 func (m model) renderAddName() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("New Profile") + "\n\n")
+	if m.duplicateSource != "" {
+		b.WriteString(titleStyle.Render("Duplicate: "+m.duplicateSource) + "\n\n")
+	} else {
+		b.WriteString(titleStyle.Render("New Profile") + "\n\n")
+	}
 	b.WriteString(labelStyle.Render("Profile name:") + "\n")
 	b.WriteString(m.input.View() + "\n")
 	if m.formErr != "" {
@@ -438,7 +542,7 @@ func (m model) renderAddName() string {
 	return b.String()
 }
 
-func (m model) renderEditVars() string {
+func (m model) renderVarList() string {
 	var b strings.Builder
 
 	if m.isAdding {
@@ -447,27 +551,48 @@ func (m model) renderEditVars() string {
 		b.WriteString(titleStyle.Render("Edit: "+m.editTarget) + "\n\n")
 	}
 
-	if len(m.pendingVars) > 0 {
-		if m.isAdding {
-			b.WriteString(labelStyle.Render("Variables:") + "\n")
-		} else {
-			b.WriteString(labelStyle.Render("Current variables:") + "\n")
-		}
-		for _, k := range sortedKeys(m.pendingVars) {
+	if len(m.varKeys) == 0 {
+		b.WriteString(dimStyle.Render("No variables yet. Press 'a' to add one.") + "\n")
+	} else {
+		b.WriteString(labelStyle.Render("Variables:") + "\n")
+		for i, k := range m.varKeys {
 			v := m.pendingVars[k]
 			if validate.IsSensitiveKey(k) {
 				v = validate.MaskValue(v)
 			}
-			b.WriteString(fmt.Sprintf("  %-28s = %s\n", k, v))
+			entry := fmt.Sprintf("%-28s = %s", k, v)
+			if i == m.varCursor {
+				b.WriteString(selectedStyle.Render("> "+entry) + "\n")
+			} else {
+				b.WriteString("  " + entry + "\n")
+			}
 		}
-		b.WriteString("\n")
 	}
 
-	prompt := "Add/update KEY=VALUE (empty to save):"
-	if m.isAdding {
-		prompt = "Enter KEY=VALUE (empty to finish):"
+	if m.formErr != "" {
+		b.WriteString("\n" + errorStyle.Render("  "+m.formErr) + "\n")
 	}
-	b.WriteString(dimStyle.Render(prompt) + "\n")
+
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render("↑↓/jk navigate  a add  enter edit  d delete  s save  esc cancel"))
+	b.WriteString("\n")
+	return b.String()
+}
+
+func (m model) renderEditOneVar() string {
+	var b strings.Builder
+
+	if m.isAdding {
+		b.WriteString(titleStyle.Render("New Profile: "+m.editTarget) + "\n\n")
+	} else {
+		b.WriteString(titleStyle.Render("Edit: "+m.editTarget) + "\n\n")
+	}
+
+	if m.editingKey != "" {
+		b.WriteString(labelStyle.Render("Edit variable:") + "\n")
+	} else {
+		b.WriteString(labelStyle.Render("Add variable:") + "\n")
+	}
 	b.WriteString(m.input.View() + "\n")
 
 	if m.formErr != "" {
@@ -475,7 +600,7 @@ func (m model) renderEditVars() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("enter add variable  empty enter saves  esc cancel"))
+	b.WriteString(helpStyle.Render("enter confirm  esc cancel"))
 	b.WriteString("\n")
 	return b.String()
 }
@@ -483,7 +608,7 @@ func (m model) renderEditVars() string {
 func (m model) renderDeleteConfirm() string {
 	var b strings.Builder
 	b.WriteString(errorStyle.Render("Delete Profile") + "\n\n")
-	b.WriteString(fmt.Sprintf("Delete %q? This cannot be undone.\n\n", m.editTarget))
+	fmt.Fprintf(&b, "Delete %q? This cannot be undone.\n\n", m.editTarget)
 	b.WriteString(helpStyle.Render("y yes  n / esc cancel"))
 	b.WriteString("\n")
 	return b.String()
