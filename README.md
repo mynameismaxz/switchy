@@ -30,6 +30,19 @@ Switchy replaces that with one command.
 
 ## Install
 
+### Homebrew (macOS and Linux)
+
+```bash
+brew tap mynameismaxz/tap
+brew install swy
+```
+
+Or in one line:
+
+```bash
+brew install mynameismaxz/tap/swy
+```
+
 ### From source
 
 ```bash
