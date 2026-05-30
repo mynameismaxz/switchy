@@ -161,7 +161,7 @@ Edit existing `export KEY=...` lines in your rc file in place — no managed blo
 
 ```bash
 swy use local --inline
-source ~/.zshrc
+# source command is copied to clipboard automatically (fallback shown if unavailable)
 ```
 
 Useful when you already have `export ANTHROPIC_BASE_URL=...` written by hand somewhere in your rc file and just want its value swapped, without introducing a Switchy-managed block. Commented-out `# export ...` lines are never touched. A backup is still created on the first write.

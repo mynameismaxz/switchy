@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"maps"
 	"sort"
 
@@ -50,7 +51,7 @@ func newUseCmd() *cobra.Command {
 					exitError("could not save state: %v", err)
 				}
 				fmt.Printf("Profile %q applied to %s.\n", name, sh.RCFile)
-				fmt.Printf("Run: source %s\n", sh.RCFile)
+				printSourceApplyHint(cmd.OutOrStdout(), sh.RCFile, clipboard.Copy)
 			} else if persistent {
 				sh, err := shell.Detect(shellOverride)
 				if err != nil {
@@ -100,4 +101,13 @@ func newUseCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&persistent, "persistent", false, "Write profile to shell rc file for future sessions")
 	cmd.Flags().BoolVar(&inline, "inline", false, "Edit export statements directly in the shell rc file (update existing or append new)")
 	return cmd
+}
+
+func printSourceApplyHint(w io.Writer, rcFile string, copyFn func(string) bool) {
+	sourceCmd := fmt.Sprintf("source %s", rcFile)
+	if copyFn(sourceCmd) {
+		fmt.Fprintln(w, "Copied to clipboard — paste and press Enter to apply.")
+		return
+	}
+	fmt.Fprintf(w, "To apply now:  %s\n", sourceCmd)
 }
