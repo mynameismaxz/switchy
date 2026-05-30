@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
+	"os"
 	"sort"
 	"strings"
 
@@ -47,6 +49,8 @@ const (
 	viewDeleteConfirm           // delete confirmation
 	viewMessage                 // success/error message
 	viewEditOneVar              // text input for a single KEY=VALUE
+	viewExportPath              // text input for export file path
+	viewImportPath              // text input for import file path
 )
 
 // ── Model ────────────────────────────────────────────────────────────────────
@@ -58,14 +62,17 @@ type model struct {
 	shell    string
 	cursor   int
 
-	input      textinput.Model
-	editTarget string
+	input       textinput.Model
+	editTarget  string
 	pendingVars map[string]string
-	isAdding   bool
-	formErr    string
+	isAdding    bool
+	formErr     string
 
 	// duplicate flow
 	duplicateSource string
+
+	// import flow
+	importReplace bool
 
 	// var-list navigation
 	varCursor  int
@@ -153,6 +160,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateEditOneVar(msg)
 		case viewDeleteConfirm:
 			return m.updateDeleteConfirm(msg)
+		case viewExportPath:
+			return m.updateExportPath(msg)
+		case viewImportPath:
+			return m.updateImportPath(msg)
 		case viewMessage:
 			m.state = viewList
 			m.message = ""
@@ -281,6 +292,23 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		)
 		m.isError = false
 		m.state = viewMessage
+
+	case "E":
+		m.state = viewExportPath
+		m.input.Reset()
+		m.input.Placeholder = "switchy-profiles.json"
+		m.input.Focus()
+		m.formErr = ""
+		return m, textinput.Blink
+
+	case "I":
+		m.state = viewImportPath
+		m.input.Reset()
+		m.input.Placeholder = "switchy-profiles.json"
+		m.input.Focus()
+		m.importReplace = false
+		m.formErr = ""
+		return m, textinput.Blink
 	}
 	return m, nil
 }
@@ -462,6 +490,135 @@ func (m model) updateDeleteConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) updateExportPath(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.state = viewList
+		return m, nil
+	case "enter":
+		path := strings.TrimSpace(m.input.Value())
+		if path == "" {
+			m.formErr = "enter a file path"
+			return m, textinput.Blink
+		}
+		pf, err := config.LoadProfiles()
+		if err != nil {
+			m.message = "Error: " + err.Error()
+			m.isError = true
+			m.state = viewMessage
+			return m, nil
+		}
+		data, err := json.MarshalIndent(pf, "", "  ")
+		if err != nil {
+			m.message = "Error: " + err.Error()
+			m.isError = true
+			m.state = viewMessage
+			return m, nil
+		}
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			m.formErr = err.Error()
+			return m, textinput.Blink
+		}
+		m.message = fmt.Sprintf("Exported %d profile(s) to %s", len(pf.Profiles), path)
+		m.isError = false
+		m.state = viewMessage
+		return m, nil
+	default:
+		m.formErr = ""
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+func (m model) updateImportPath(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.state = viewList
+		return m, nil
+	case "enter":
+		path := strings.TrimSpace(m.input.Value())
+		if path == "" {
+			m.formErr = "enter a file path"
+			return m, textinput.Blink
+		}
+		data, err := os.ReadFile(path) // #nosec G304 -- path is user-provided via TUI input
+		if err != nil {
+			m.formErr = err.Error()
+			return m, textinput.Blink
+		}
+		var pf config.ProfilesFile
+		if err := json.Unmarshal(data, &pf); err != nil {
+			m.formErr = "invalid file: " + err.Error()
+			return m, textinput.Blink
+		}
+		if pf.Profiles == nil || len(pf.Profiles) == 0 {
+			m.formErr = "no profiles found in file"
+			return m, textinput.Blink
+		}
+		// Validate before importing
+		for name, vars := range pf.Profiles {
+			if err := validate.ProfileName(name); err != nil {
+				m.formErr = fmt.Sprintf("invalid profile name %q: %v", name, err)
+				return m, textinput.Blink
+			}
+			for k := range vars {
+				if err := validate.EnvKey(k); err != nil {
+					m.formErr = fmt.Sprintf("invalid key %q in profile %q: %v", k, name, err)
+					return m, textinput.Blink
+				}
+			}
+		}
+		if m.importReplace {
+			existing, err := config.LoadProfiles()
+			if err != nil {
+				m.message = "Error: " + err.Error()
+				m.isError = true
+				m.state = viewMessage
+				return m, nil
+			}
+			for name := range existing.Profiles {
+				if err := profile.DeleteProfile(name, true); err != nil {
+					m.message = "Error deleting " + name + ": " + err.Error()
+					m.isError = true
+					m.state = viewMessage
+					return m, nil
+				}
+			}
+		}
+		added := 0
+		updated := 0
+		for name, vars := range pf.Profiles {
+			_, err := profile.GetProfile(name)
+			exists := err == nil
+			if err := profile.UpsertProfile(name, vars); err != nil {
+				m.message = "Error importing " + name + ": " + err.Error()
+				m.isError = true
+				m.state = viewMessage
+				return m, nil
+			}
+			if exists {
+				updated++
+			} else {
+				added++
+			}
+		}
+		m.reload()
+		m.message = fmt.Sprintf("Imported %d profile(s) (%d added, %d updated)", len(pf.Profiles), added, updated)
+		m.isError = false
+		m.state = viewMessage
+		return m, nil
+	case "r", "R":
+		m.importReplace = !m.importReplace
+		return m, nil
+	default:
+		m.formErr = ""
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
 // ── View renderers ───────────────────────────────────────────────────────────
 
 func (m model) View() string {
@@ -476,6 +633,10 @@ func (m model) View() string {
 		return m.renderEditOneVar()
 	case viewDeleteConfirm:
 		return m.renderDeleteConfirm()
+	case viewExportPath:
+		return m.renderExportPath()
+	case viewImportPath:
+		return m.renderImportPath()
 	case viewMessage:
 		return m.renderMessage()
 	}
@@ -519,7 +680,7 @@ func (m model) renderList() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑↓/jk navigate  a add  p dup  e edit  d delete  s use  x export  q quit"))
+	b.WriteString(helpStyle.Render("↑↓/jk navigate  a add  p dup  e edit  d delete  s use  x view  E export  I import  q quit"))
 	b.WriteString("\n")
 	return b.String()
 }
@@ -610,6 +771,39 @@ func (m model) renderDeleteConfirm() string {
 	b.WriteString(errorStyle.Render("Delete Profile") + "\n\n")
 	fmt.Fprintf(&b, "Delete %q? This cannot be undone.\n\n", m.editTarget)
 	b.WriteString(helpStyle.Render("y yes  n / esc cancel"))
+	b.WriteString("\n")
+	return b.String()
+}
+
+func (m model) renderExportPath() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Export Profiles") + "\n\n")
+	b.WriteString(labelStyle.Render("File path:") + "\n")
+	b.WriteString(m.input.View() + "\n")
+	if m.formErr != "" {
+		b.WriteString(errorStyle.Render("  "+m.formErr) + "\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render("enter confirm  esc cancel"))
+	b.WriteString("\n")
+	return b.String()
+}
+
+func (m model) renderImportPath() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Import Profiles") + "\n\n")
+	b.WriteString(labelStyle.Render("File path:") + "\n")
+	b.WriteString(m.input.View() + "\n")
+	replaceLabel := "no"
+	if m.importReplace {
+		replaceLabel = "yes (will replace all profiles)"
+	}
+	b.WriteString(dimStyle.Render("Replace all: " + replaceLabel) + "\n")
+	if m.formErr != "" {
+		b.WriteString(errorStyle.Render("  "+m.formErr) + "\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render("enter confirm  r toggle replace  esc cancel"))
 	b.WriteString("\n")
 	return b.String()
 }
