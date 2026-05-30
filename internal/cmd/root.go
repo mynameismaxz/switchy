@@ -38,6 +38,9 @@ and switch between them without manually editing shell config files.`,
 		newDeleteCmd(),
 		newInitCmd(),
 		newVersionCmd(version),
+		newCompletionCmd(),
+		newExportConfigCmd(),
+		newImportConfigCmd(),
 	)
 
 	return root

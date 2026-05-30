@@ -10,7 +10,7 @@ Shell: zsh  •  Current: local
       staging
       prod
 
-↑↓/jk navigate  a add  e edit  d delete  s switch  x export  q quit
+↑↓/jk navigate  a add  p dup  e edit  d delete  s use  x view  E export  I import  q quit
 ```
 
 ---
@@ -34,13 +34,13 @@ Switchy replaces that with one command.
 
 ```bash
 brew tap mynameismaxz/tap
-brew install swy
+brew install switchy
 ```
 
 Or in one line:
 
 ```bash
-brew install mynameismaxz/tap/swy
+brew install mynameismaxz/tap/switchy
 ```
 
 ### From source
@@ -188,6 +188,50 @@ swy delete staging
 swy delete local --force
 ```
 
+### `swy export-config [output-file]`
+
+Export all profiles to a portable JSON file for backup or transfer.
+
+```bash
+# Print to stdout
+swy export-config
+
+# Save to a file
+swy export-config my-profiles.json
+swy export-config -o my-profiles.json
+```
+
+### `swy import-config <input-file>`
+
+Import profiles from a JSON file created by `swy export-config`. By default, profiles are merged (existing profiles with the same name are updated). Use `--replace` to remove all existing profiles first.
+
+```bash
+# Merge profiles from a file
+swy import-config my-profiles.json
+
+# Replace all existing profiles
+swy import-config my-profiles.json --replace
+```
+
+### `swy completion <shell>`
+
+Generate shell completion script for autocomplete support. Profile names are dynamically completed for `swy use`.
+
+```bash
+# Bash
+source <(swy completion bash)
+swy completion bash >> ~/.bashrc
+
+# Zsh
+source <(swy completion zsh)
+swy completion zsh >> ~/.zshrc
+
+# Fish
+swy completion fish > ~/.config/fish/completions/swy.fish
+```
+
+Once enabled, `swy use <TAB>` will show available profile names with the current profile marked.
+
 ### `swy init`
 
 Install the `swyuse()` helper function into your rc file (idempotent — safe to run multiple times).
@@ -224,7 +268,7 @@ Shell: zsh  •  Current: local
       staging
       prod
 
-↑↓/jk navigate  a add  e edit  d delete  s switch  x export  q quit
+↑↓/jk navigate  a add  p dup  e edit  d delete  s use  x view  E export  I import  q quit
 ```
 
 **Keybindings:**
@@ -234,10 +278,13 @@ Shell: zsh  •  Current: local
 | `↑` / `k` | Move up |
 | `↓` / `j` | Move down |
 | `a` | Add new profile |
+| `p` | Duplicate selected profile |
 | `e` | Edit selected profile |
 | `d` | Delete selected profile |
-| `s` | Select profile and apply inline to rc file |
-| `x` | Show export commands |
+| `s` | Select profile (session mode) |
+| `x` | Show export commands for profile |
+| `E` | Export all profiles to a JSON file |
+| `I` | Import profiles from a JSON file |
 | `q` | Quit |
 
 ---

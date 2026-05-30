@@ -18,9 +18,10 @@ func newUseCmd() *cobra.Command {
 	var inline bool
 
 	cmd := &cobra.Command{
-		Use:   "use <profile>",
-		Short: "Select a profile (optionally persist it to the shell rc file)",
-		Args:  cobra.ExactArgs(1),
+		Use:               "use <profile>",
+		Short:             "Select a profile (optionally persist it to the shell rc file)",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: profileCompletion,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			if err := validate.ProfileName(name); err != nil {
