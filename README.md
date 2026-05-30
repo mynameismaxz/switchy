@@ -34,13 +34,13 @@ Switchy replaces that with one command.
 
 ```bash
 brew tap mynameismaxz/tap
-brew install swy
+brew install switchy
 ```
 
 Or in one line:
 
 ```bash
-brew install mynameismaxz/tap/swy
+brew install mynameismaxz/tap/switchy
 ```
 
 ### From source

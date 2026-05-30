@@ -552,7 +552,7 @@ func (m model) updateImportPath(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.formErr = "invalid file: " + err.Error()
 			return m, textinput.Blink
 		}
-		if pf.Profiles == nil || len(pf.Profiles) == 0 {
+		if len(pf.Profiles) == 0 {
 			m.formErr = "no profiles found in file"
 			return m, textinput.Blink
 		}
