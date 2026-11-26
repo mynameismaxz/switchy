@@ -28,7 +28,10 @@ func WriteActivationBlock(sh DetectedShell, exports []string) error {
 	return writeLines(sh.RCFile, lines)
 }
 
-// WriteInitBlock writes the swyuse() helper block into the RC file.
+// WriteInitBlock writes the swy shell hook block into the RC file.
+// The hook makes `swy use` / `swy off` apply to the current shell immediately
+// and keeps existing shells in sync on every prompt. Existing (older, simpler)
+// init blocks are replaced in place.
 func WriteInitBlock(sh DetectedShell) error {
 	if err := BackupIfNeeded(sh); err != nil {
 		return err
@@ -37,14 +40,45 @@ func WriteInitBlock(sh DetectedShell) error {
 	if err != nil {
 		return err
 	}
-	helper := []string{
-		`swyuse() {`,
-		`  eval "$(swy export "$1")"`,
-		`}`,
-	}
-	block := buildBlock(InitStart, InitEnd, helper)
+	block := buildBlock(InitStart, InitEnd, hookLines(sh.Type))
 	lines = replaceOrAppendBlock(lines, InitStart, InitEnd, block)
 	return writeLines(sh.RCFile, lines)
+}
+
+// HookScript returns the swy shell hook as a printable script for manual
+// installation (e.g. `swy hook zsh >> ~/.zshrc`).
+func HookScript(t ShellType) string {
+	return strings.Join(hookLines(t), "\n")
+}
+
+// hookLines returns the per-shell hook definitions.
+func hookLines(t ShellType) []string {
+	body := []string{
+		`# Managed by switchy (swy). Remove this whole block to uninstall.`,
+		`swy() {`,
+		`  case "$1" in`,
+		`    use) shift; SWITCHY_HOOK=1 command swy use "$@" && eval "$(command swy hook-apply)" ;;`,
+		`    off) shift; eval "$(command swy off "$@")" ;;`,
+		`    *)   command swy "$@" ;;`,
+		`  esac`,
+		`}`,
+		`swyuse() { swy use "$@"; }`,
+		`swy_hook() { eval "$(command swy hook-apply 2>/dev/null)" || true; }`,
+	}
+	switch t {
+	case ShellBash:
+		return append(body,
+			`case "$PROMPT_COMMAND" in`,
+			`  *swy_hook*) ;;`,
+			`  *) PROMPT_COMMAND="swy_hook${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;`,
+			`esac`,
+		)
+	default: // ShellZsh and future shells default to the zsh-style hook
+		return append(body,
+			`autoload -Uz add-zsh-hook`,
+			`add-zsh-hook precmd swy_hook`,
+		)
+	}
 }
 
 // HasInitBlock reports whether the RC file already contains the init managed block.
@@ -57,6 +91,41 @@ func HasInitBlock(sh DetectedShell) (bool, error) {
 		return false, err
 	}
 	start, _ := findBlock(lines, InitStart, InitEnd)
+	return start >= 0, nil
+}
+
+// InitBlockUpToDate reports whether the RC file contains the current hook-based
+// init block (as opposed to a block written by an older swy version).
+func InitBlockUpToDate(sh DetectedShell) (bool, error) {
+	lines, err := readLines(sh.RCFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	start, end := findBlock(lines, InitStart, InitEnd)
+	if start < 0 {
+		return false, nil
+	}
+	for _, line := range lines[start : end+1] {
+		if strings.Contains(line, "hook-apply") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// HasActivationBlock reports whether the RC file contains the activation block.
+func HasActivationBlock(sh DetectedShell) (bool, error) {
+	lines, err := readLines(sh.RCFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	start, _ := findBlock(lines, ActivationStart, ActivationEnd)
 	return start >= 0, nil
 }
 

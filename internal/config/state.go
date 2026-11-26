@@ -10,6 +10,17 @@ import (
 type StateFile struct {
 	CurrentProfile     string `json:"currentProfile"`
 	LastActivationMode string `json:"lastActivationMode"` // "session" | "persistent" | ""
+	// Generation is bumped on every `swy use` and `swy off`. The shell hook
+	// compares it with $SWITCHY_APPLIED_GEN to decide whether a shell needs
+	// to re-apply the selected profile. Old state files without this field
+	// load as 0.
+	Generation int `json:"generation,omitempty"`
+}
+
+// BumpGeneration increments Generation and saves the state file.
+func (sf *StateFile) BumpGeneration() error {
+	sf.Generation++
+	return SaveState(sf)
 }
 
 func LoadState() (*StateFile, error) {
