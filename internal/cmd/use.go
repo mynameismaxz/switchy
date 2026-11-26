@@ -7,14 +7,13 @@ import (
 	"sort"
 
 	"github.com/mynameismaxz/switchy/internal/clipboard"
-	"github.com/mynameismaxz/switchy/internal/config"
 	"github.com/mynameismaxz/switchy/internal/profile"
 	"github.com/mynameismaxz/switchy/internal/shell"
 	"github.com/mynameismaxz/switchy/internal/validate"
 	"github.com/spf13/cobra"
 )
 
-// hookEnv marks that `swy use` was invoked by the shell hook wrapper. In this
+// hookEnv marks that `swy` or `swy use` was invoked by the shell hook wrapper. In this
 // mode the hook itself applies the exports, so the command skips the clipboard
 // flow and prints only a one-line status to stderr.
 const hookEnv = "SWITCHY_HOOK"
@@ -49,7 +48,7 @@ func newUseCmd() *cobra.Command {
 				if err := shell.UpsertExports(sh, upsertVars); err != nil {
 					exitError("could not update %s: %v", sh.RCFile, err)
 				}
-				if err := selectProfile(name, "persistent"); err != nil {
+				if err := profile.SelectProfile(name, "persistent"); err != nil {
 					exitError("%v", err)
 				}
 				fmt.Printf("Profile %q applied to %s.\n", name, sh.RCFile)
@@ -72,7 +71,7 @@ func newUseCmd() *cobra.Command {
 				if err := shell.WriteActivationBlock(sh, exports); err != nil {
 					exitError("could not update %s: %v", sh.RCFile, err)
 				}
-				if err := selectProfile(name, "persistent"); err != nil {
+				if err := profile.SelectProfile(name, "persistent"); err != nil {
 					exitError("%v", err)
 				}
 				fmt.Printf("Profile %q activated in %s.\n", name, sh.RCFile)
@@ -82,7 +81,7 @@ func newUseCmd() *cobra.Command {
 					fmt.Printf("Run: source %s\n", sh.RCFile)
 				}
 			} else {
-				if err := selectProfile(name, "session"); err != nil {
+				if err := profile.SelectProfile(name, "session"); err != nil {
 					exitError("%v", err)
 				}
 				if hookMode() {
@@ -111,21 +110,6 @@ func newUseCmd() *cobra.Command {
 }
 
 func hookMode() bool { return os.Getenv(hookEnv) == "1" }
-
-// selectProfile records the selection in state and bumps the generation so
-// hooked shells pick the change up on their next prompt.
-func selectProfile(name, mode string) error {
-	st, err := config.LoadState()
-	if err != nil {
-		return fmt.Errorf("could not load state: %w", err)
-	}
-	st.CurrentProfile = name
-	st.LastActivationMode = mode
-	if err := st.BumpGeneration(); err != nil {
-		return fmt.Errorf("could not save state: %w", err)
-	}
-	return nil
-}
 
 // hookTip suggests the one-time hook installation when the session-mode
 // clipboard flow is being used without the hook installed.

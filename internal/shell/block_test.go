@@ -145,6 +145,7 @@ func TestWriteInitBlock_ZshHook(t *testing.T) {
 	content := string(data)
 	want := []string{
 		"swy() {",
+		`"")  SWITCHY_HOOK=1 command swy "$@" && eval "$(command swy hook-apply)" ;;`,
 		`use) shift; SWITCHY_HOOK=1 command swy use "$@" && eval "$(command swy hook-apply)" ;;`,
 		`off) shift; eval "$(command swy off "$@")" ;;`,
 		"add-zsh-hook precmd swy_hook",
@@ -170,6 +171,7 @@ func TestWriteInitBlock_BashHook(t *testing.T) {
 	content := string(data)
 	want := []string{
 		"swy() {",
+		`"")  SWITCHY_HOOK=1 command swy "$@" && eval "$(command swy hook-apply)" ;;`,
 		`use) shift; SWITCHY_HOOK=1 command swy use "$@" && eval "$(command swy hook-apply)" ;;`,
 		`PROMPT_COMMAND="swy_hook${PROMPT_COMMAND:+;$PROMPT_COMMAND}"`,
 	}
@@ -185,7 +187,7 @@ func TestWriteInitBlock_BashHook(t *testing.T) {
 
 func TestWriteInitBlock_UpgradeOldBlock(t *testing.T) {
 	oldBlock := InitStart + "\nswyuse() {\n  eval \"$(swy export \"$1\")\"\n}\n" + InitEnd + "\n"
-	sh, _ := makeTestShell(t, "# user content\n" + oldBlock + "# keep me\n")
+	sh, _ := makeTestShell(t, "# user content\n"+oldBlock+"# keep me\n")
 	if err := WriteInitBlock(sh); err != nil {
 		t.Fatal(err)
 	}
@@ -215,6 +217,18 @@ func TestInitBlockUpToDate(t *testing.T) {
 		}
 		if upToDate {
 			t.Error("old block should not be up to date")
+		}
+	})
+	t.Run("hook without TUI support", func(t *testing.T) {
+		oldHook := strings.Replace(HookScript(ShellZsh),
+			`    "")  SWITCHY_HOOK=1 command swy "$@" && eval "$(command swy hook-apply)" ;;`+"\n", "", 1)
+		sh, _ := makeTestShell(t, InitStart+"\n"+oldHook+"\n"+InitEnd+"\n")
+		upToDate, err := InitBlockUpToDate(sh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if upToDate {
+			t.Error("hook without TUI support should be upgraded")
 		}
 	})
 	t.Run("current block", func(t *testing.T) {

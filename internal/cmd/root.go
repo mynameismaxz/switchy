@@ -20,7 +20,7 @@ and switch between them without manually editing shell config files.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := tui.Run(); err != nil {
+			if err := tui.Run(hookMode()); err != nil {
 				exitError("TUI error: %v", err)
 			}
 		},

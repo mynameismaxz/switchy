@@ -35,6 +35,21 @@ func GetProfile(name string) (map[string]string, error) {
 	return vars, nil
 }
 
+// SelectProfile records the selection and bumps the generation so hooked
+// shells pick up the change.
+func SelectProfile(name, mode string) error {
+	st, err := config.LoadState()
+	if err != nil {
+		return fmt.Errorf("could not load state: %w", err)
+	}
+	st.CurrentProfile = name
+	st.LastActivationMode = mode
+	if err := st.BumpGeneration(); err != nil {
+		return fmt.Errorf("could not save state: %w", err)
+	}
+	return nil
+}
+
 // DeleteProfile removes a profile. If force is false and the profile is current, returns an error.
 func DeleteProfile(name string, force bool) error {
 	pf, err := config.LoadProfiles()

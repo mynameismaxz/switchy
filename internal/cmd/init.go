@@ -13,9 +13,9 @@ func newInitCmd() *cobra.Command {
 		Short: "Install the swy shell hook into your rc file",
 		Long: `Install the swy shell hook into your rc file (idempotent — safe to run multiple times).
 
-After sourcing your rc file once, "swy use <profile>" and "swy off" apply to
-the current shell immediately — no clipboard, no pasting, no eval — and other
-hooked shells follow along on their next prompt.`,
+After sourcing your rc file once, pressing "s" in the TUI, running
+"swy use <profile>", or running "swy off" takes effect in the current shell
+immediately. Other hooked shells follow on their next prompt.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sh, err := shell.Detect(shellOverride)
@@ -38,7 +38,7 @@ hooked shells follow along on their next prompt.`,
 				exitError("could not update %s: %v", sh.RCFile, err)
 			}
 			if already {
-				fmt.Printf("Shell hook upgraded in %s (older helper replaced).\n", sh.RCFile)
+				fmt.Printf("Shell hook upgraded in %s.\n", sh.RCFile)
 			} else {
 				fmt.Printf("Shell hook installed in %s.\n", sh.RCFile)
 			}
