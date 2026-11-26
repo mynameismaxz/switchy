@@ -36,6 +36,7 @@ func Copy(text string) bool {
 	if _, err := in.Write([]byte(text)); err != nil {
 		return false
 	}
-	in.Close()
+	// The write already succeeded; a close error (if any) surfaces via Wait.
+	_ = in.Close()
 	return cmd.Wait() == nil
 }
