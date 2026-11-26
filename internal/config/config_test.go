@@ -50,17 +50,27 @@ func TestStateRoundtrip(t *testing.T) {
 		if st.CurrentProfile != "" {
 			t.Error("expected empty state on first load")
 		}
+		if st.Generation != 0 {
+			t.Errorf("expected generation 0 on first load, got %d", st.Generation)
+		}
 
 		st.CurrentProfile = "prod"
 		st.LastActivationMode = "persistent"
-		if err := SaveState(st); err != nil {
+		if err := st.BumpGeneration(); err != nil {
 			t.Fatal(err)
+		}
+		if st.Generation != 1 {
+			t.Errorf("expected generation 1 after bump, got %d", st.Generation)
 		}
 
 		loaded, err := LoadState()
 		if err != nil {
 			t.Fatal(err)
 		}
+		if loaded.Generation != 1 {
+			t.Errorf("expected generation to persist as 1, got %d", loaded.Generation)
+		}
+
 		if loaded.CurrentProfile != "prod" {
 			t.Errorf("expected prod, got %q", loaded.CurrentProfile)
 		}

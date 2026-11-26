@@ -65,17 +65,24 @@ make build
 ## Quick start
 
 ```bash
+# One-time setup: install the shell hook into your rc file
+swy init
+source ~/.zshrc   # or: source ~/.bashrc
+
 # Create a profile
 swy set local ANTHROPIC_BASE_URL=http://localhost:8080 API_KEY=dev-key
 
-# Select it — the apply command is copied to your clipboard automatically
+# Apply it — takes effect in this shell immediately, no clipboard, no pasting
 swy use local
-# → paste and press Enter to apply
 
-# Or install the shell helper once (no clipboard needed)
-swy init
-swyuse local
+# Switch anytime; other open shells follow along on their next prompt
+swy use prod
+
+# Unload the profile from this shell
+swy off
 ```
+
+Without the hook, `swy use` still works via the clipboard: the apply command is copied and you paste it to apply.
 
 ---
 
@@ -127,13 +134,25 @@ export SWITCHY_PROFILE='local'
 
 ### `swy use <profile>`
 
-Mark a profile as selected and copy the apply command to your clipboard automatically. Does not modify the rc file.
+Mark a profile as selected and apply it.
+
+With the **shell hook** installed (see `swy init`), the profile's variables are applied to the current shell immediately — no clipboard, no pasting, no `source`:
+
+```bash
+swy use local
+# ⚡ applied "local" to this shell
+```
+
+Other shells with the hook installed also pick up the change on their next prompt, and new terminals start with the selected profile loaded automatically.
+
+Without the hook, the apply command is copied to your clipboard instead:
 
 ```bash
 swy use local
 # Profile "local" selected.
 # Copied to clipboard — paste and press Enter to apply.
 # To persist:    swy use local --persistent
+# Tip: run `swy init` once so `swy use` applies instantly — no clipboard needed.
 ```
 
 Just paste and press Enter — no typing required. If no clipboard tool is available, the `eval` command is printed instead:
@@ -146,11 +165,12 @@ Just paste and press Enter — no typing required. If no clipboard tool is avail
 
 ### `swy use <profile> --persistent`
 
-Write the profile into a managed block in your shell rc file so future shells load it automatically.
+Write the profile into a managed block in your shell rc file so future shells load it automatically. With the hook installed, it is also applied to the current shell right away — no `source` needed.
 
 ```bash
 swy use prod --persistent
-source ~/.zshrc
+# Profile "prod" activated in ~/.zshrc.
+# Applied to this shell — no source needed.
 ```
 
 Writes to `~/.zshrc` (zsh) or `~/.bashrc` (bash). A backup is created at `~/.zshrc.switchy.bak` before the first modification.
@@ -234,20 +254,61 @@ Once enabled, `swy use <TAB>` will show available profile names with the current
 
 ### `swy init`
 
-Install the `swyuse()` helper function into your rc file (idempotent — safe to run multiple times).
+Install the swy shell hook into your rc file (idempotent — safe to run multiple times). This is the recommended setup: after sourcing your rc file once, switching is instant.
 
 ```bash
 swy init
-# then in any shell:
-swyuse local
+source ~/.zshrc   # once — after this, switchy applies instantly
+swy use local     # applied to this shell immediately
 ```
 
-The installed function:
+The installed managed block defines:
+
+- **`swy()` wrapper** — intercepts `swy use` and `swy off` so they take effect in the current shell right away; every other subcommand is passed through untouched.
+- **`swyuse()` helper** — kept for muscle memory: `swyuse local` behaves like `swy use local`.
+- **A prompt hook** — on every prompt, the shell evals `swy hook-apply`, which applies the selected profile only if its state changed since the shell last synced. This is what keeps other terminals in sync.
 
 ```bash
-swyuse() {
-  eval "$(swy export "$1")"
+swy() {
+  case "$1" in
+    use) shift; SWITCHY_HOOK=1 command swy use "$@" && eval "$(command swy hook-apply)" ;;
+    off) shift; eval "$(command swy off "$@")" ;;
+    *)   command swy "$@" ;;
+  esac
 }
+```
+
+If an older `swyuse()`-only block exists, `swy init` upgrades it in place.
+
+### `swy hook <zsh|bash>`
+
+Print the hook script for manual installation instead of using `swy init`:
+
+```bash
+swy hook zsh >> ~/.zshrc
+swy hook bash >> ~/.bashrc
+```
+
+### `swy off`
+
+Remove the active profile from the current shell (unset its variables, including `SWITCHY_PROFILE`) and clear the selection. With the hook installed, plain `swy off` does this for you; hooked shells in other terminals unload on their next prompt.
+
+```bash
+swy off
+```
+
+If a persistent block remains in your rc file, Switchy prints a note — new shells would still load it. Remove the block too with:
+
+```bash
+swy off --persistent
+```
+
+### `swy hook-apply`
+
+Internal command used by the shell hook (hidden from help). Compares the state generation with the shell's `SWITCHY_APPLIED_GEN` marker and prints the exports needed to catch up. Useful for debugging the hook:
+
+```bash
+eval "$(swy hook-apply)"
 ```
 
 ### `swy` (no arguments)
@@ -282,6 +343,8 @@ Shell: zsh  •  Current: local
 | `e` | Edit selected profile |
 | `d` | Delete selected profile |
 | `s` | Select profile (session mode) |
+
+Selecting a profile from the TUI records the selection; shells with the hook installed apply it on their next prompt.
 | `x` | Show export commands for profile |
 | `E` | Export all profiles to a JSON file |
 | `I` | Import profiles from a JSON file |
@@ -330,8 +393,10 @@ Configuration is stored in `~/.config/switchy/`:
 ```
 ~/.config/switchy/
 ├── profiles.json   # all profiles and their variables
-└── state.json      # currently selected profile and activation mode
+└── state.json      # current profile, activation mode, and generation counter
 ```
+
+`state.json` also stores a `generation` counter that increases on every `swy use` / `swy off`. The shell hook compares it with each shell's `SWITCHY_APPLIED_GEN` marker to decide whether the shell needs to re-apply the profile — this is what makes switching sync across terminals.
 
 Files are created with `0600` permissions. Values are stored in plaintext — Switchy is not a secret manager.
 
@@ -360,10 +425,11 @@ make clean    # remove ./bin
 ```
 cmd/swy/            binary entrypoint
 internal/
+  activation/       pure rendering of hook apply/off scripts
   config/           JSON storage (profiles.json, state.json)
   validate/         input validation
   profile/          profile CRUD
-  shell/            shell detection and rc file management
+  shell/            shell detection, rc file management, hook script
   cmd/              cobra CLI commands
   tui/              bubbletea TUI
 ```

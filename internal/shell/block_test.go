@@ -136,6 +136,145 @@ func TestHasInitBlock_TrueWhenPresent(t *testing.T) {
 	}
 }
 
+func TestWriteInitBlock_ZshHook(t *testing.T) {
+	sh, _ := makeTestShell(t, "")
+	if err := WriteInitBlock(sh); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(sh.RCFile)
+	content := string(data)
+	want := []string{
+		"swy() {",
+		`use) shift; SWITCHY_HOOK=1 command swy use "$@" && eval "$(command swy hook-apply)" ;;`,
+		`off) shift; eval "$(command swy off "$@")" ;;`,
+		"add-zsh-hook precmd swy_hook",
+	}
+	for _, w := range want {
+		if !strings.Contains(content, w) {
+			t.Errorf("zsh hook missing %q\ncontent:\n%s", w, content)
+		}
+	}
+	if strings.Contains(content, "PROMPT_COMMAND") {
+		t.Error("zsh hook must not reference PROMPT_COMMAND")
+	}
+}
+
+func TestWriteInitBlock_BashHook(t *testing.T) {
+	sh, _ := makeTestShell(t, "")
+	sh.Type = ShellBash
+	sh.RCFile = filepath.Join(filepath.Dir(sh.RCFile), ".bashrc")
+	if err := WriteInitBlock(sh); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(sh.RCFile)
+	content := string(data)
+	want := []string{
+		"swy() {",
+		`use) shift; SWITCHY_HOOK=1 command swy use "$@" && eval "$(command swy hook-apply)" ;;`,
+		`PROMPT_COMMAND="swy_hook${PROMPT_COMMAND:+;$PROMPT_COMMAND}"`,
+	}
+	for _, w := range want {
+		if !strings.Contains(content, w) {
+			t.Errorf("bash hook missing %q\ncontent:\n%s", w, content)
+		}
+	}
+	if strings.Contains(content, "add-zsh-hook") {
+		t.Error("bash hook must not reference add-zsh-hook")
+	}
+}
+
+func TestWriteInitBlock_UpgradeOldBlock(t *testing.T) {
+	oldBlock := InitStart + "\nswyuse() {\n  eval \"$(swy export \"$1\")\"\n}\n" + InitEnd + "\n"
+	sh, _ := makeTestShell(t, "# user content\n" + oldBlock + "# keep me\n")
+	if err := WriteInitBlock(sh); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(sh.RCFile)
+	content := string(data)
+	if strings.Count(content, InitStart) != 1 {
+		t.Error("old init block must be replaced, not duplicated")
+	}
+	if strings.Contains(content, `eval "$(swy export "$1")"`) {
+		t.Error("old swyuse body should have been replaced")
+	}
+	if !strings.Contains(content, "hook-apply") {
+		t.Error("new hook content should be present")
+	}
+	if !strings.Contains(content, "# user content") || !strings.Contains(content, "# keep me") {
+		t.Error("content outside the block must be preserved")
+	}
+}
+
+func TestInitBlockUpToDate(t *testing.T) {
+	t.Run("old block", func(t *testing.T) {
+		oldBlock := InitStart + "\nswyuse() { echo hi; }\n" + InitEnd + "\n"
+		sh, _ := makeTestShell(t, oldBlock)
+		upToDate, err := InitBlockUpToDate(sh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if upToDate {
+			t.Error("old block should not be up to date")
+		}
+	})
+	t.Run("current block", func(t *testing.T) {
+		sh, _ := makeTestShell(t, "")
+		if err := WriteInitBlock(sh); err != nil {
+			t.Fatal(err)
+		}
+		upToDate, err := InitBlockUpToDate(sh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !upToDate {
+			t.Error("freshly written block should be up to date")
+		}
+	})
+	t.Run("no block", func(t *testing.T) {
+		sh, _ := makeTestShell(t, "")
+		upToDate, err := InitBlockUpToDate(sh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if upToDate {
+			t.Error("no block should not be up to date")
+		}
+	})
+}
+
+func TestHasActivationBlock(t *testing.T) {
+	sh, _ := makeTestShell(t, "")
+	has, err := HasActivationBlock(sh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Error("expected no activation block")
+	}
+	if err := WriteActivationBlock(sh, []string{"export FOO='bar'"}); err != nil {
+		t.Fatal(err)
+	}
+	has, err = HasActivationBlock(sh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Error("expected activation block to be found")
+	}
+}
+
+func TestHookScript_Printable(t *testing.T) {
+	for _, tt := range []ShellType{ShellZsh, ShellBash} {
+		script := HookScript(tt)
+		if strings.Contains(script, "\n\n") {
+			t.Errorf("%s hook script should not contain blank lines", tt)
+		}
+		if !strings.Contains(script, "hook-apply") {
+			t.Errorf("%s hook script missing hook-apply", tt)
+		}
+	}
+}
+
 func TestBackupIfNeeded_CreatesBackup(t *testing.T) {
 	sh, _ := makeTestShell(t, "export ORIGINAL=1\n")
 	if err := BackupIfNeeded(sh); err != nil {

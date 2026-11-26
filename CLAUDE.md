@@ -18,7 +18,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Layered packages (strict downward dependencies)
 
 ```
-cmd/  →  tui/, profile/, shell/, clipboard/, validate/, config/
+cmd/  →  tui/, activation/, profile/, shell/, clipboard/, validate/, config/
+activation/  →  shell/  (pure script rendering, no I/O)
 profile/  →  config/
 shell/  →  (self-contained, file I/O only)
 config/  →  (self-contained, JSON + paths)
@@ -31,7 +32,9 @@ validate/  →  (pure functions)
 
 Two JSON files under `~/.config/switchy/` (mode `0600`, written atomically via temp+rename):
 - `profiles.json` — `{version, profiles: {name: {KEY: VALUE}}}`
-- `state.json` — `{currentProfile, lastActivationMode}` where mode is `"session"` | `"persistent"` | `""`
+- `state.json` — `{currentProfile, lastActivationMode, generation}` where mode is `"session"` | `"persistent"` | `""`; `generation` is bumped via `StateFile.BumpGeneration()` on every `swy use` / `swy off` and drives shell-hook sync
+
+Always load-modify-save state (never construct a fresh `StateFile`) so `generation` is preserved.
 
 Tests inject a temp dir via the package-private `configDirOverride` in `paths.go`.
 
@@ -43,7 +46,19 @@ Tests inject a temp dir via the package-private `configDirOverride` in `paths.go
 2. **`--persistent`** — `shell.WriteActivationBlock` writes a managed block delimited by `# >>> switchy start >>>` / `# <<< switchy end <<<` into `~/.zshrc` or `~/.bashrc`. The block is replaced in-place; nothing outside it is touched.
 3. **`--inline`** — `shell.UpsertExports` rewrites individual `export KEY=...` lines in the rc file (updating the first non-commented match per key, appending new keys at the end).
 
-`swy init` writes a separate managed block (`# >>> switchy init start >>>`) containing the `swyuse()` helper. Both block writers call `BackupIfNeeded`, which creates `~/.zshrc.switchy.bak` once before the first modification.
+`swy init` writes a separate managed block (`# >>> switchy init start >>>`) containing the shell hook: a `swy()` wrapper (intercepts `use`/`off`, sets `SWITCHY_HOOK=1`, evals `swy hook-apply`), a `swyuse()` alias, and a prompt hook (`precmd` for zsh, `PROMPT_COMMAND` for bash). Old `swyuse()`-only blocks are upgraded in place — `InitBlockUpToDate` detects the version. Both block writers call `BackupIfNeeded`, which creates `~/.zshrc.switchy.bak` once before the first modification.
+
+### Shell hook sync model
+
+`internal/cmd/hook.go` (`swy hook-apply`, `swy off`) + `internal/activation` implement hook sync:
+
+- Every `swy use` / `swy off` bumps `state.json` `generation`.
+- Each hooked shell records the last applied generation in `SWITCHY_APPLIED_GEN` and its loaded profile in `SWITCHY_PROFILE`.
+- `swy hook-apply` (run on every prompt by the hook) prints exports only when `generation > SWITCHY_APPLIED_GEN`; the wrapper evals them, so `swy use` is instant and other terminals follow on their next prompt.
+- `swy off` prints `unset` lines (eval'd by the wrapper), clears `currentProfile`, and bumps the generation so other shells unload too.
+- `internal/cmd/use.go` reads `SWITCHY_HOOK=1` (set by the wrapper) to skip the clipboard flow and print a one-line status to stderr — stdout must stay clean when the hook evals.
+
+When changing the hook script, mirror edits in `shell.hookLines`, the README init example, and `block_test.go`.
 
 ### Shell escaping
 
