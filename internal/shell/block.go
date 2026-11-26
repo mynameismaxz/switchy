@@ -3,6 +3,7 @@ package shell
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -29,9 +30,9 @@ func WriteActivationBlock(sh DetectedShell, exports []string) error {
 }
 
 // WriteInitBlock writes the swy shell hook block into the RC file.
-// The hook makes `swy use` / `swy off` apply to the current shell immediately
-// and keeps existing shells in sync on every prompt. Existing (older, simpler)
-// init blocks are replaced in place.
+// The hook applies profile changes from the TUI, `swy use`, and `swy off`
+// immediately and keeps existing shells in sync on every prompt. Older init
+// blocks are replaced in place.
 func WriteInitBlock(sh DetectedShell) error {
 	if err := BackupIfNeeded(sh); err != nil {
 		return err
@@ -56,7 +57,8 @@ func hookLines(t ShellType) []string {
 	body := []string{
 		`# Managed by switchy (swy). Remove this whole block to uninstall.`,
 		`swy() {`,
-		`  case "$1" in`,
+		`  case "${1-}" in`,
+		`    "")  SWITCHY_HOOK=1 command swy "$@" && eval "$(command swy hook-apply)" ;;`,
 		`    use) shift; SWITCHY_HOOK=1 command swy use "$@" && eval "$(command swy hook-apply)" ;;`,
 		`    off) shift; eval "$(command swy off "$@")" ;;`,
 		`    *)   command swy "$@" ;;`,
@@ -95,7 +97,7 @@ func HasInitBlock(sh DetectedShell) (bool, error) {
 }
 
 // InitBlockUpToDate reports whether the RC file contains the current hook-based
-// init block (as opposed to a block written by an older swy version).
+// init block for the detected shell.
 func InitBlockUpToDate(sh DetectedShell) (bool, error) {
 	lines, err := readLines(sh.RCFile)
 	if err != nil {
@@ -108,12 +110,7 @@ func InitBlockUpToDate(sh DetectedShell) (bool, error) {
 	if start < 0 {
 		return false, nil
 	}
-	for _, line := range lines[start : end+1] {
-		if strings.Contains(line, "hook-apply") {
-			return true, nil
-		}
-	}
-	return false, nil
+	return slices.Equal(lines[start+1:end], hookLines(sh.Type)), nil
 }
 
 // HasActivationBlock reports whether the RC file contains the activation block.
@@ -175,7 +172,7 @@ func replaceOrAppendBlock(lines []string, startMarker, endMarker string, block [
 	start, end := findBlock(lines, startMarker, endMarker)
 	if start >= 0 {
 		// Replace lines[start..end] with block
-		result := make([]string, 0, len(lines)-( end-start+1)+len(block))
+		result := make([]string, 0, len(lines)-(end-start+1)+len(block))
 		result = append(result, lines[:start]...)
 		result = append(result, block...)
 		result = append(result, lines[end+1:]...)

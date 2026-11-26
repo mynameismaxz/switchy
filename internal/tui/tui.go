@@ -61,6 +61,7 @@ type model struct {
 	current  string
 	shell    string
 	cursor   int
+	hooked   bool
 
 	input       textinput.Model
 	editTarget  string
@@ -89,12 +90,13 @@ type model struct {
 	height int
 }
 
-func initialModel() model {
+func initialModel(hooked bool) model {
 	ti := textinput.New()
 	ti.CharLimit = 500
 
 	m := model{
 		state:       viewList,
+		hooked:      hooked,
 		pendingVars: make(map[string]string),
 		input:       ti,
 	}
@@ -120,8 +122,8 @@ func (m *model) reload() {
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 
-func Run() error {
-	m := initialModel()
+func Run(hooked bool) error {
+	m := initialModel(hooked)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	final, err := p.Run()
 	if err != nil {
@@ -255,13 +257,25 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		name := m.profiles[m.cursor]
+		if _, err := profile.GetProfile(name); err != nil {
+			m.message = err.Error()
+			m.isError = true
+			m.state = viewMessage
+			return m, nil
+		}
+		if err := profile.SelectProfile(name, "session"); err != nil {
+			m.message = err.Error()
+			m.isError = true
+			m.state = viewMessage
+			return m, nil
+		}
+		if m.hooked {
+			m.finalMsg = fmt.Sprintf("Profile %q selected.", name)
+			return m, tea.Quit
+		}
+
 		evalCmd := fmt.Sprintf(`eval "$(swy export %s)"`, name)
-		copied := clipboard.Copy(evalCmd)
-		_ = config.SaveState(&config.StateFile{
-			CurrentProfile:     name,
-			LastActivationMode: "session",
-		})
-		if copied {
+		if clipboard.Copy(evalCmd) {
 			m.finalMsg = fmt.Sprintf("Switched to %q — command copied to clipboard.\nPaste and press Enter to apply.", name)
 		} else {
 			m.finalMsg = fmt.Sprintf("Switched to %q.\nTo apply:  %s", name, evalCmd)
@@ -798,7 +812,7 @@ func (m model) renderImportPath() string {
 	if m.importReplace {
 		replaceLabel = "yes (will replace all profiles)"
 	}
-	b.WriteString(dimStyle.Render("Replace all: " + replaceLabel) + "\n")
+	b.WriteString(dimStyle.Render("Replace all: "+replaceLabel) + "\n")
 	if m.formErr != "" {
 		b.WriteString(errorStyle.Render("  "+m.formErr) + "\n")
 	}

@@ -264,13 +264,14 @@ swy use local     # applied to this shell immediately
 
 The installed managed block defines:
 
-- **`swy()` wrapper** — intercepts `swy use` and `swy off` so they take effect in the current shell right away; every other subcommand is passed through untouched.
+- **`swy()` wrapper** — applies profile changes from the TUI (`swy` with no arguments), `swy use`, and `swy off` in the current shell right away.
 - **`swyuse()` helper** — kept for muscle memory: `swyuse local` behaves like `swy use local`.
 - **A prompt hook** — on every prompt, the shell evals `swy hook-apply`, which applies the selected profile only if its state changed since the shell last synced. This is what keeps other terminals in sync.
 
 ```bash
 swy() {
-  case "$1" in
+  case "${1-}" in
+    "")  SWITCHY_HOOK=1 command swy "$@" && eval "$(command swy hook-apply)" ;;
     use) shift; SWITCHY_HOOK=1 command swy use "$@" && eval "$(command swy hook-apply)" ;;
     off) shift; eval "$(command swy off "$@")" ;;
     *)   command swy "$@" ;;
@@ -278,7 +279,7 @@ swy() {
 }
 ```
 
-If an older `swyuse()`-only block exists, `swy init` upgrades it in place.
+`swy init` upgrades older managed blocks in place, including hooks installed before TUI support. Source your rc file again or open a new terminal to load the updated hook.
 
 ### `swy hook <zsh|bash>`
 
@@ -342,13 +343,13 @@ Shell: zsh  •  Current: local
 | `p` | Duplicate selected profile |
 | `e` | Edit selected profile |
 | `d` | Delete selected profile |
-| `s` | Select profile (session mode) |
-
-Selecting a profile from the TUI records the selection; shells with the hook installed apply it on their next prompt.
+| `s` | Use selected profile (session mode) |
 | `x` | Show export commands for profile |
 | `E` | Export all profiles to a JSON file |
 | `I` | Import profiles from a JSON file |
 | `q` | Quit |
+
+With the shell hook installed, select a profile and press `s` to close the TUI and apply the profile immediately in the same shell. Other hooked shells apply it on their next prompt. Without the hook, Switchy copies the apply command to the clipboard or prints it if the clipboard is unavailable.
 
 ---
 

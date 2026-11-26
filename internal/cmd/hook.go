@@ -18,9 +18,9 @@ func newHookCmd() *cobra.Command {
 		Short: "Print the shell hook script for manual installation",
 		Long: `Print the shell hook script for manual installation.
 
-The hook makes "swy use" and "swy off" apply to the current shell immediately,
-no clipboard or pasting needed. "swy init" installs it for you; use this
-command only to install it by hand, for example:
+The hook applies profile changes from the TUI, "swy use", and "swy off" to the
+current shell immediately. "swy init" installs it for you; use this command
+only to install it by hand, for example:
 
   swy hook zsh >> ~/.zshrc
   swy hook bash >> ~/.bashrc`,

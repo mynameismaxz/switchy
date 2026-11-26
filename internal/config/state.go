@@ -10,7 +10,7 @@ import (
 type StateFile struct {
 	CurrentProfile     string `json:"currentProfile"`
 	LastActivationMode string `json:"lastActivationMode"` // "session" | "persistent" | ""
-	// Generation is bumped on every `swy use` and `swy off`. The shell hook
+	// Generation is bumped when a profile is selected or turned off. The shell hook
 	// compares it with $SWITCHY_APPLIED_GEN to decide whether a shell needs
 	// to re-apply the selected profile. Old state files without this field
 	// load as 0.
