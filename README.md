@@ -33,15 +33,18 @@ Switchy replaces that with one command.
 ### Homebrew (macOS and Linux)
 
 ```bash
-brew tap mynameismaxz/tap
-brew install switchy
-```
-
-Or in one line:
-
-```bash
 brew install mynameismaxz/tap/switchy
 ```
+
+On Homebrew 6+, installing with the fully qualified name trusts only the Switchy formula. If you prefer to explicitly trust the entire [tap](https://github.com/mynameismaxz/homebrew-tap), run:
+
+```bash
+brew tap mynameismaxz/tap
+brew trust mynameismaxz/tap
+brew install mynameismaxz/tap/switchy
+```
+
+See [Homebrew's tap trust documentation](https://docs.brew.sh/Tap-Trust) for the difference between formula and tap trust.
 
 ### From source
 
@@ -58,6 +61,43 @@ Requires Go 1.25+. The binary is installed to `$GOPATH/bin/swy`.
 ```bash
 make build
 # binary at ./bin/swy
+```
+
+## Update
+
+### Homebrew
+
+```bash
+brew update
+brew upgrade mynameismaxz/tap/switchy
+```
+
+If Homebrew reports that an existing installation is from an untrusted tap, trust just the Switchy formula and retry the upgrade:
+
+```bash
+brew trust --formula mynameismaxz/tap/switchy
+brew upgrade mynameismaxz/tap/switchy
+```
+
+### From source
+
+In your existing Switchy checkout, update `main` and reinstall:
+
+```bash
+git switch main && git pull --ff-only origin main && make install
+```
+
+If you run the binary directly from `./bin/swy`, use `make build` instead of `make install`.
+
+### After updating
+
+Run `swy version` to check the installed version. A source build reports `dev` by default. Your saved profiles stay in `~/.config/switchy/`.
+
+If you use the shell hook, rerun `swy init` to pick up any hook changes. Then open a new terminal or reload your shell configuration:
+
+```bash
+swy init
+source ~/.zshrc   # or: source ~/.bashrc
 ```
 
 ---
