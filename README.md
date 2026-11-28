@@ -46,6 +46,20 @@ brew install mynameismaxz/tap/switchy
 
 See [Homebrew's tap trust documentation](https://docs.brew.sh/Tap-Trust) for the difference between formula and tap trust.
 
+### Linux packages
+
+Download the package for your distribution and CPU architecture (`amd64`/`x86_64` or `arm64`/`aarch64`) from [GitHub Releases](https://github.com/mynameismaxz/switchy/releases). Run the matching command from the download directory, replacing `PACKAGE` with the downloaded filename without its extension:
+
+```bash
+# Debian / Ubuntu
+sudo apt install ./PACKAGE.deb
+
+# Fedora / RHEL
+sudo dnf install ./PACKAGE.rpm
+```
+
+The package installs `swy` to `/usr/bin/swy`. To upgrade, download and install the newer package the same way.
+
 ### From source
 
 ```bash

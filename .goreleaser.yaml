@@ -36,6 +36,15 @@ archives:
       - goos: windows
         formats: [zip]
 
+nfpms:
+  - package_name: switchy
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    maintainer: mynameismaxz <mynameismaxz@users.noreply.github.com>
+    homepage: https://github.com/mynameismaxz/switchy
+    description: "CLI tool for managing named env-var profiles and applying them to your shell"
+    license: MIT
+
 checksum:
   name_template: "checksums.txt"
 
@@ -56,7 +65,7 @@ brews:
     install: |
       bin.install "swy"
     test: |
-      system "#{bin}/swy --version"
+      system "#{bin}/swy", "version"
 
 changelog:
   sort: asc
